@@ -24,6 +24,7 @@ Open `index.html` in a browser, or serve this folder with any static file server
 - Variable creation from selected text (`{variable_name}`)
 - Replace-all exact repetitions
 - Restore placeholders one-by-one or all at once
+- Project-scoped variables usable across all files
 - Copy sanitized output
 - Export sanitized markdown to `.docx` (basic formatting)
 - Autosave-only workflow (no manual Save button)

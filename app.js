@@ -391,8 +391,22 @@ function getActiveFile() {
   return state.files.find((item) => item.id === state.activeFileId) || null;
 }
 
-function getVariables(file) {
-  return Array.isArray(file.variables) ? file.variables : [];
+function getProjectVariables() {
+  const project = getActiveProject();
+  return Array.isArray(project?.variables) ? project.variables : [];
+}
+
+async function persistProject(project, statusMessage) {
+  project.updatedAt = getNowIso();
+  await dbPut("projects", project);
+  const index = state.projects.findIndex((item) => item.id === project.id);
+  if (index >= 0) {
+    state.projects[index] = project;
+  }
+  renderAll();
+  if (statusMessage) {
+    setStatus(statusMessage);
+  }
 }
 
 function setEditorEnabled(enabled) {
@@ -441,7 +455,7 @@ function renderFiles() {
 }
 
 function renderVariables(file) {
-  const variables = getVariables(file);
+  const variables = getProjectVariables();
 
   if (variables.length === 0) {
     els.variableList.innerHTML = "<li><span class='muted'>No variables yet.</span></li>";
@@ -451,8 +465,9 @@ function renderVariables(file) {
   els.variableList.innerHTML = variables
     .map((entry) => {
       const placeholder = `{${entry.name}}`;
-      const placeholderCount = SanitizerCore.countOccurrences(file.sanitizedContent, placeholder);
-      const valueCount = SanitizerCore.countOccurrences(file.sanitizedContent, entry.value);
+      const text = file?.sanitizedContent ?? "";
+      const placeholderCount = SanitizerCore.countOccurrences(text, placeholder);
+      const valueCount = SanitizerCore.countOccurrences(text, entry.value);
       return `<li>
         <div class="variable-row">
           <code>${entry.name}</code>
@@ -532,6 +547,7 @@ async function createProject(name) {
   const now = getNowIso();
   const project = {
     name,
+    variables: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -573,9 +589,30 @@ async function loadInitialState() {
     const project = await createProject("Default Project");
     state.activeProjectId = project.id;
   } else {
+    state.projects = state.projects.map((project) => ({
+      ...project,
+      variables: Array.isArray(project.variables) ? project.variables : [],
+    }));
     const savedProject = saved?.activeProjectId;
     const exists = state.projects.some((project) => project.id === savedProject);
     state.activeProjectId = exists ? savedProject : state.projects[0].id;
+  }
+
+  for (const project of state.projects) {
+    const projectVars = project.variables || [];
+    const fileVars = state.files
+      .filter((file) => file.projectId === project.id)
+      .flatMap((file) => (Array.isArray(file.variables) ? file.variables : []));
+    for (const entry of fileVars) {
+      if (!projectVars.some((item) => item.name === entry.name)) {
+        projectVars.push({ name: entry.name, value: entry.value });
+      }
+    }
+    project.variables = projectVars;
+  }
+
+  for (const project of state.projects) {
+    await dbPut("projects", project);
   }
 
   const projectFiles = state.files.filter((file) => file.projectId === state.activeProjectId);
@@ -738,7 +775,11 @@ async function createVariableFromSelection() {
   }
 
   const name = requestedName.trim();
-  const existing = getVariables(file).find((entry) => entry.name === name);
+  const project = getActiveProject();
+  if (!project) {
+    return;
+  }
+  const existing = getProjectVariables().find((entry) => entry.name === name);
 
   if (existing && existing.value !== selected) {
     setStatus(`Variable ${name} already exists with a different value.`);
@@ -761,7 +802,8 @@ async function createVariableFromSelection() {
   file.sanitizedContent = result.text;
 
   if (!existing) {
-    file.variables = [...getVariables(file), { name, value: result.selected }];
+    project.variables = [...getProjectVariables(), { name, value: result.selected }];
+    await persistProject(project);
   }
 
   await persistFile(file, `Created ${result.placeholder}.`);
@@ -773,7 +815,7 @@ async function restoreAllVariables() {
     return;
   }
 
-  const result = SanitizerCore.restoreAll(file.sanitizedContent, getVariables(file));
+  const result = SanitizerCore.restoreAll(file.sanitizedContent, getProjectVariables());
   file.sanitizedContent = result.text;
   await persistFile(file, `Restore-all completed. Replaced ${result.replacedTotal} placeholder(s).`);
 }
@@ -784,7 +826,7 @@ async function restoreOneVariable(name) {
     return;
   }
 
-  const variable = getVariables(file).find((entry) => entry.name === name);
+  const variable = getProjectVariables().find((entry) => entry.name === name);
   if (!variable) {
     setStatus(`Variable ${name} not found.`);
     return;
@@ -801,7 +843,7 @@ async function applyOneVariable(name) {
     return;
   }
 
-  const variable = getVariables(file).find((entry) => entry.name === name);
+  const variable = getProjectVariables().find((entry) => entry.name === name);
   if (!variable) {
     setStatus(`Variable ${name} not found.`);
     return;
@@ -819,7 +861,7 @@ async function deleteVariable(name) {
     return;
   }
 
-  const variable = getVariables(file).find((entry) => entry.name === name);
+  const variable = getProjectVariables().find((entry) => entry.name === name);
   if (!variable) {
     setStatus(`Variable ${name} not found.`);
     return;
@@ -836,8 +878,13 @@ async function deleteVariable(name) {
   }
 
   file.sanitizedContent = SanitizerCore.replaceAllExact(file.sanitizedContent, placeholder, variable.value);
-  file.variables = getVariables(file).filter((entry) => entry.name !== name);
-  await persistFile(file, `Variable ${placeholder} deleted.`);
+  const project = getActiveProject();
+  if (!project) {
+    return;
+  }
+  project.variables = getProjectVariables().filter((entry) => entry.name !== name);
+  await persistProject(project, `Variable ${placeholder} deleted.`);
+  await persistFile(file);
 }
 
 async function applyAllVariables() {
@@ -848,7 +895,7 @@ async function applyAllVariables() {
 
   let totalApplied = 0;
   let nextText = file.sanitizedContent;
-  for (const variable of getVariables(file)) {
+  for (const variable of getProjectVariables()) {
     const count = SanitizerCore.countOccurrences(nextText, variable.value);
     totalApplied += count;
     nextText = SanitizerCore.replaceAllExact(nextText, variable.value, `{${variable.name}}`);
@@ -869,7 +916,6 @@ async function resetSanitizedFromOriginal() {
   }
 
   file.sanitizedContent = file.originalContent;
-  file.variables = [];
   await persistFile(file, "Sanitized content reset from original.");
 }
 
