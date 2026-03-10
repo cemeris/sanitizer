@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sanitizer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <h1>Sanitizer</h1>
+          <p>Markdown-first private data sanitization, browser-only and offline-first.</p>
+        </div>
+        <div class="header-actions">
+          <button id="projectsViewBtn" type="button" class="ghost">Projects</button>
+          <button id="filesViewBtn" type="button" class="ghost">Files</button>
+          <button id="variablesViewBtn" type="button" class="ghost">Variables</button>
+          <button id="openImportModalBtn" type="button">Import File(s)</button>
+        </div>
+      </header>
+
+      <section class="workspace-grid">
+        <aside class="panel sidebar">
+          <section id="projectsView" class="sidebar-view">
+            <h2>Projects</h2>
+            <ul id="projectList" class="list"></ul>
+            <button id="newProjectBtn" type="button" class="ghost full">New Project</button>
+            <button id="deleteProjectBtn" type="button" class="ghost danger full">Delete Active Project</button>
+          </section>
+
+          <section id="filesView" class="sidebar-view hidden">
+            <h2>Files</h2>
+            <ul id="fileList" class="list"></ul>
+            <button id="newFileBtn" type="button" class="ghost full">New Empty File</button>
+            <button id="deleteFileBtn" type="button" class="ghost danger full">Delete Active File</button>
+          </section>
+
+          <section id="variablesView" class="sidebar-view hidden">
+            <h2>Variables</h2>
+            <ul id="variableList" class="list variable-list"></ul>
+          </section>
+        </aside>
+
+        <section class="panel editor-area">
+          <div class="editor-topbar">
+            <div>
+              <h2 id="activeFileTitle">No file selected</h2>
+              <p id="activeFileMeta" class="muted"></p>
+            </div>
+            <div class="toolbar">
+              <button id="createVariableBtn" type="button">Create Variable</button>
+              <label class="checkbox">
+                <input id="replaceAllToggle" type="checkbox" checked />
+                Replace all exact repetitions
+              </label>
+              <button id="restoreAllBtn" type="button" class="ghost">Restore All</button>
+              <button id="applyAllBtn" type="button" class="ghost">Apply All Variables</button>
+              <button id="resetSanitizedBtn" type="button" class="ghost">Reset From Original</button>
+              <button id="copySanitizedBtn" type="button" class="ghost">Copy Sanitized Text</button>
+              <button id="exportDocxBtn" type="button" class="ghost">Export DOCX</button>
+            </div>
+          </div>
+
+          <details class="hints">
+            <summary>Markdown Hints</summary>
+            <div class="hints-grid">
+              <p><code># Title</code> and <code>## Section</code></p>
+              <p><code>**bold**</code> and <code>*italic*</code></p>
+              <p><code>- item</code> for bullet lists</p>
+              <p><code>[label](https://example.com)</code> for links</p>
+              <p><code>`inline code`</code> and fenced code blocks</p>
+              <p><code>{client_name}</code> placeholders for sanitized values</p>
+              <p><code>:::center</code> ... <code>:::</code> for alignment blocks</p>
+              <p>Tables: <code>| Col | Col |</code> + <code>| --- | --- |</code></p>
+              <p>Select text and press <code>Space</code> to create a variable</p>
+            </div>
+          </details>
+
+          <div class="editor-grid">
+            <div>
+              <h3>Sanitized Markdown</h3>
+              <textarea id="markdownInput" spellcheck="false" placeholder="Paste or import content..."></textarea>
+            </div>
+            <div>
+              <h3>Preview</h3>
+              <div id="preview" class="preview"></div>
+            </div>
+          </div>
+
+        </section>
+      </section>
+    </main>
+
+    <dialog id="importModal" class="modal">
+      <form method="dialog" class="modal-card" id="importForm">
+        <h2>Import Files</h2>
+        <p class="muted">Supports multiple files: <code>.md</code>, <code>.txt</code>, <code>.html</code>, <code>.htm</code>, <code>.docx</code>.</p>
+        <input id="filePicker" type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.docx,text/plain,text/markdown,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        <div class="modal-actions">
+          <button id="closeImportModalBtn" type="button" class="ghost">Cancel</button>
+          <button id="confirmImportBtn" type="submit">Import</button>
+        </div>
+      </form>
+    </dialog>
+
+    <footer class="app-footer">
+      <p>
+        &copy; 2026 Vitālijs Čemeris. Developed by Vitālijs Čemeris.
+        <a href="https://apgut.com" target="_blank" rel="noreferrer">apgut.com</a>
+      </p>
+      <span id="status" class="status status-hidden"></span>
+    </footer>
+
+    <script src="./vendor/mammoth.browser.min.js"></script>
+    <script src="./vendor/docx.iife.js"></script>
+    <script src="./sanitizer-core.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
