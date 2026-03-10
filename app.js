@@ -39,7 +39,6 @@ const els = {
   replaceAllToggle: document.getElementById("replaceAllToggle"),
   restoreAllBtn: document.getElementById("restoreAllBtn"),
   applyAllBtn: document.getElementById("applyAllBtn"),
-  resetSanitizedBtn: document.getElementById("resetSanitizedBtn"),
   activeFileTitle: document.getElementById("activeFileTitle"),
   activeFileMeta: document.getElementById("activeFileMeta"),
   copySanitizedBtn: document.getElementById("copySanitizedBtn"),
@@ -414,7 +413,6 @@ function setEditorEnabled(enabled) {
   els.createVariableBtn.disabled = !enabled;
   els.restoreAllBtn.disabled = !enabled;
   els.applyAllBtn.disabled = !enabled;
-  els.resetSanitizedBtn.disabled = !enabled;
   els.copySanitizedBtn.disabled = !enabled;
   els.exportDocxBtn.disabled = !enabled;
   els.deleteFileBtn.disabled = !enabled;
@@ -905,19 +903,6 @@ async function applyAllVariables() {
   await persistFile(file, `Apply-all completed. Replaced ${totalApplied} value match(es).`);
 }
 
-async function resetSanitizedFromOriginal() {
-  const file = getActiveFile();
-  if (!file) {
-    return;
-  }
-
-  if (!window.confirm("Reset sanitized text from original content?")) {
-    return;
-  }
-
-  file.sanitizedContent = file.originalContent;
-  await persistFile(file, "Sanitized content reset from original.");
-}
 
 async function copySanitizedText() {
   const file = getActiveFile();
@@ -1354,9 +1339,6 @@ function bindEvents() {
     await applyAllVariables();
   });
 
-  els.resetSanitizedBtn.addEventListener("click", async () => {
-    await resetSanitizedFromOriginal();
-  });
 
   els.variableList.addEventListener("click", async (event) => {
     const target = event.target;
