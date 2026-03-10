@@ -25,6 +25,8 @@ Open `index.html` in a browser, or serve this folder with any static file server
 - Replace-all exact repetitions
 - Restore placeholders one-by-one or all at once
 - Project-scoped variables usable across all files
+- Auto-detect sensitive data (emails, LV phone numbers, LV company prefixes)
+- Auto-detects: IBAN, personal code, address, dates, registration numbers, vehicle plates, postal codes, URLs with query params
 - Copy sanitized output
 - Export sanitized markdown to `.docx` (basic formatting)
 - Autosave-only workflow (no manual Save button)

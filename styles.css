@@ -80,6 +80,8 @@ body.sidebar-collapsed .sidebar {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 82dvh;
+  overflow: auto;
 }
 
 .sidebar section {
@@ -93,6 +95,10 @@ body.sidebar-collapsed .sidebar {
 }
 
 .sidebar-view.hidden {
+  display: none;
+}
+
+.hidden {
   display: none;
 }
 
@@ -144,8 +150,16 @@ h3 {
 }
 
 .variable-row {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.variable-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .variable-row code {
@@ -154,9 +168,17 @@ h3 {
 
 .variable-actions {
   display: flex;
+  flex-direction: column;
   gap: 6px;
-  align-items: center;
-  flex-wrap: nowrap;
+  align-items: flex-end;
+}
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .full {
@@ -185,7 +207,8 @@ button.danger {
 }
 
 .editor-area {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -199,6 +222,24 @@ button.danger {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.select select {
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
 }
 
 .checkbox {
@@ -342,6 +383,45 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.detect-summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.badge {
+  border: 1px solid #7ea9a3;
+  background: #dff3f1;
+  color: #0b5952;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.detect-value {
+  font-family: "IBM Plex Mono", Menlo, monospace;
+  font-size: 13px;
+  color: #1b2a42;
+}
+
+.detect-snippet {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: #fbfcff;
+  font-family: "IBM Plex Mono", Menlo, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.detect-snippet mark {
+  background: #ffe08a;
+  color: #4a2c00;
+  padding: 0 2px;
 }
 
 .app-footer {

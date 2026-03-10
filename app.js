@@ -1,6 +1,7 @@
 const DB_NAME = "sanitizer-db";
 const DB_VERSION = 1;
 const UI_STATE_KEY = "sanitizer.ui-state.v1";
+const CLEAR_ON_NEXT_LOAD_KEY = "sanitizer.clear-on-next-load";
 
 const state = {
   projects: [],
@@ -11,6 +12,12 @@ const state = {
   statusTimer: null,
   sidebarOpen: false,
   activeSidebarView: "projects",
+  region: "lv",
+  detectQueue: [],
+  detectIndex: 0,
+  detecting: false,
+  retention: "keep",
+  exportFormat: "docx",
 };
 
 const els = {
@@ -18,9 +25,11 @@ const els = {
   projectsViewBtn: document.getElementById("projectsViewBtn"),
   filesViewBtn: document.getElementById("filesViewBtn"),
   variablesViewBtn: document.getElementById("variablesViewBtn"),
+  settingsViewBtn: document.getElementById("settingsViewBtn"),
   projectsView: document.getElementById("projectsView"),
   filesView: document.getElementById("filesView"),
   variablesView: document.getElementById("variablesView"),
+  settingsView: document.getElementById("settingsView"),
   projectList: document.getElementById("projectList"),
   fileList: document.getElementById("fileList"),
   variableList: document.getElementById("variableList"),
@@ -37,12 +46,26 @@ const els = {
   preview: document.getElementById("preview"),
   createVariableBtn: document.getElementById("createVariableBtn"),
   replaceAllToggle: document.getElementById("replaceAllToggle"),
+  regionSelect: document.getElementById("regionSelect"),
+  detectSensitiveBtn: document.getElementById("detectSensitiveBtn"),
+  detectModal: document.getElementById("detectModal"),
+  detectForm: document.getElementById("detectForm"),
+  detectType: document.getElementById("detectType"),
+  detectValue: document.getElementById("detectValue"),
+  detectSnippet: document.getElementById("detectSnippet"),
+  detectApplyBtn: document.getElementById("detectApplyBtn"),
+  detectSkipBtn: document.getElementById("detectSkipBtn"),
+  detectStopBtn: document.getElementById("detectStopBtn"),
+  retentionSelect: document.getElementById("retentionSelect"),
+  exportFormatSelect: document.getElementById("exportFormatSelect"),
+  clearDataBtn: document.getElementById("clearDataBtn"),
   restoreAllBtn: document.getElementById("restoreAllBtn"),
   applyAllBtn: document.getElementById("applyAllBtn"),
   activeFileTitle: document.getElementById("activeFileTitle"),
   activeFileMeta: document.getElementById("activeFileMeta"),
   copySanitizedBtn: document.getElementById("copySanitizedBtn"),
   exportDocxBtn: document.getElementById("exportDocxBtn"),
+  exportHtmlBtn: document.getElementById("exportHtmlBtn"),
 };
 
 function setStatus(message) {
@@ -60,6 +83,9 @@ function saveUiState() {
     activeFileId: state.activeFileId,
     sidebarOpen: state.sidebarOpen,
     activeSidebarView: state.activeSidebarView,
+    region: state.region,
+    retention: state.retention,
+    exportFormat: state.exportFormat,
   };
   window.localStorage.setItem(UI_STATE_KEY, JSON.stringify(payload));
 }
@@ -81,9 +107,11 @@ function setSidebarView(view) {
   els.projectsView.classList.toggle("hidden", view !== "projects");
   els.filesView.classList.toggle("hidden", view !== "files");
   els.variablesView.classList.toggle("hidden", view !== "variables");
+  els.settingsView.classList.toggle("hidden", view !== "settings");
   els.projectsViewBtn.classList.toggle("active", view === "projects");
   els.filesViewBtn.classList.toggle("active", view === "files");
   els.variablesViewBtn.classList.toggle("active", view === "variables");
+  els.settingsViewBtn.classList.toggle("active", view === "settings");
   saveUiState();
 }
 
@@ -327,6 +355,9 @@ function htmlNodeToMarkdown(node) {
   }
 
   const tag = node.tagName.toLowerCase();
+  if (tag === "table") {
+    return tableToMarkdown(node) + "\n\n";
+  }
   const children = [...node.childNodes].map(htmlNodeToMarkdown).join("");
 
   if (tag === "strong" || tag === "b") {
@@ -375,6 +406,87 @@ function htmlNodeToMarkdown(node) {
   return children;
 }
 
+function inlineFromNode(node) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent || "";
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return "";
+  }
+  const tag = node.tagName.toLowerCase();
+  if (tag === "strong" || tag === "b") {
+    return `**${[...node.childNodes].map(inlineFromNode).join("")}**`;
+  }
+  if (tag === "em" || tag === "i") {
+    return `*${[...node.childNodes].map(inlineFromNode).join("")}*`;
+  }
+  if (tag === "code") {
+    return `\`${[...node.childNodes].map(inlineFromNode).join("")}\``;
+  }
+  if (tag === "a") {
+    const href = node.getAttribute("href") || "";
+    const text = [...node.childNodes].map(inlineFromNode).join("");
+    return href ? `[${text}](${href})` : text;
+  }
+  if (tag === "br") {
+    return "<br>";
+  }
+  if (tag === "p") {
+    return [...node.childNodes].map(inlineFromNode).join("") + "<br>";
+  }
+  return [...node.childNodes].map(inlineFromNode).join("");
+}
+
+function sanitizeTableCell(text) {
+  return text
+    .replace(/\n+/g, "<br>")
+    .replace(/\|/g, "\\|")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tableToMarkdown(tableNode) {
+  const rows = [...tableNode.querySelectorAll("tr")];
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const rowToCells = (row) =>
+    [...row.children]
+      .filter((cell) => cell.tagName && (cell.tagName.toLowerCase() === "td" || cell.tagName.toLowerCase() === "th"))
+      .map((cell) => sanitizeTableCell(inlineFromNode(cell)));
+
+  let headerCells = [];
+  let bodyRows = [];
+
+  const theadRow = tableNode.querySelector("thead tr");
+  if (theadRow) {
+    headerCells = rowToCells(theadRow);
+    bodyRows = rows.filter((row) => row !== theadRow).map(rowToCells);
+  } else {
+    headerCells = rowToCells(rows[0]);
+    bodyRows = rows.slice(1).map(rowToCells);
+  }
+
+  const colCount = Math.max(headerCells.length, ...bodyRows.map((r) => r.length), 1);
+  const normalizeRow = (row) => {
+    const filled = row.slice(0, colCount);
+    while (filled.length < colCount) {
+      filled.push("");
+    }
+    return filled;
+  };
+
+  headerCells = normalizeRow(headerCells);
+  bodyRows = bodyRows.map(normalizeRow);
+
+  const headerLine = `| ${headerCells.join(" | ")} |`;
+  const separatorLine = `| ${headerCells.map(() => "---").join(" | ")} |`;
+  const bodyLines = bodyRows.map((row) => `| ${row.join(" | ")} |`);
+
+  return [headerLine, separatorLine, ...bodyLines].join("\n");
+}
+
 function htmlToMarkdown(html) {
   const root = document.createElement("div");
   root.innerHTML = html;
@@ -415,7 +527,15 @@ function setEditorEnabled(enabled) {
   els.applyAllBtn.disabled = !enabled;
   els.copySanitizedBtn.disabled = !enabled;
   els.exportDocxBtn.disabled = !enabled;
+  els.exportHtmlBtn.disabled = !enabled;
   els.deleteFileBtn.disabled = !enabled;
+  els.detectSensitiveBtn.disabled = !enabled;
+}
+
+function applyExportFormatSetting() {
+  const showHtml = state.exportFormat === "docx_html";
+  els.exportHtmlBtn.classList.toggle("hidden", !showHtml);
+  saveUiState();
 }
 
 function renderProjects() {
@@ -468,13 +588,15 @@ function renderVariables(file) {
       const valueCount = SanitizerCore.countOccurrences(text, entry.value);
       return `<li>
         <div class="variable-row">
-          <code>${entry.name}</code>
-          <code>${escapeHtml(entry.value)}</code>
-          <span class="muted">${placeholderCount} placeholder(s), ${valueCount} value match(es)</span>
+          <div class="variable-meta">
+            <code>${entry.name}</code>
+            <code>${escapeHtml(entry.value)}</code>
+            <span class="muted">${placeholderCount} placeholder(s), ${valueCount} value match(es)</span>
+          </div>
           <div class="variable-actions">
-            <button type='button' class='ghost' data-action='restore-one' data-name='${entry.name}'>Restore</button>
-            <button type='button' class='ghost' data-action='apply-one' data-name='${entry.name}'>Apply</button>
-            <button type='button' class='ghost danger' data-action='delete-variable' data-name='${entry.name}'>Delete</button>
+            <button type='button' class='ghost icon-btn' data-action='restore-one' data-name='${entry.name}' title='Restore' aria-label='Restore'>&lt;</button>
+            <button type='button' class='ghost icon-btn' data-action='apply-one' data-name='${entry.name}' title='Apply' aria-label='Apply'>&gt;</button>
+            <button type='button' class='ghost danger icon-btn' data-action='delete-variable' data-name='${entry.name}' title='Delete' aria-label='Delete'>x</button>
           </div>
         </div>
       </li>`;
@@ -619,7 +741,18 @@ async function loadInitialState() {
   state.activeFileId = activeInProject ? savedFile : projectFiles.length > 0 ? projectFiles[0].id : null;
   state.sidebarOpen = saved?.sidebarOpen === true;
   state.activeSidebarView =
-    saved?.activeSidebarView === "files" || saved?.activeSidebarView === "variables" ? saved.activeSidebarView : "projects";
+    saved?.activeSidebarView === "files" ||
+    saved?.activeSidebarView === "variables" ||
+    saved?.activeSidebarView === "settings"
+      ? saved.activeSidebarView
+      : "projects";
+  state.region = saved?.region === "lv" ? "lv" : "lv";
+  els.regionSelect.value = state.region;
+  state.retention = saved?.retention === "clear_on_next_load" ? "clear_on_next_load" : "keep";
+  els.retentionSelect.value = state.retention;
+  state.exportFormat = saved?.exportFormat === "docx_html" ? "docx_html" : "docx";
+  els.exportFormatSelect.value = state.exportFormat;
+  applyExportFormatSetting();
 
   renderAll();
 }
@@ -765,7 +898,7 @@ async function createVariableFromSelection() {
   const selection = getSelectionRange();
   const range = getTrimmedSelectionRange(file.sanitizedContent, selection.start, selection.end);
   const selected = file.sanitizedContent.slice(range.start, range.end);
-  const guess = SanitizerCore.suggestVariableName(selected);
+  const guess = suggestVariableNameForValue(selected, state.region) + "_" + randomSuffix();
   const requestedName = window.prompt("Variable name (lowercase + numbers + underscore):", guess);
 
   if (!requestedName) {
@@ -903,6 +1036,249 @@ async function applyAllVariables() {
   await persistFile(file, `Apply-all completed. Replaced ${totalApplied} value match(es).`);
 }
 
+function createUniqueVariableName(baseName) {
+  const existingNames = new Set(getProjectVariables().map((entry) => entry.name));
+  if (!existingNames.has(baseName)) {
+    return baseName;
+  }
+  let i = 2;
+  while (existingNames.has(`${baseName}_${i}`)) {
+    i += 1;
+  }
+  return `${baseName}_${i}`;
+}
+
+function maskExistingPlaceholders(text) {
+  return text.replace(/\{[a-zA-Z][a-zA-Z0-9_]*\}/g, " ");
+}
+
+function suggestVariableNameForValue(value, region) {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  const emailDisplayRegex = /<\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\s*>/;
+  const phoneRegexLv = /^(?:\+371|371)?[\s-]?(?:2\d{7}|6\d{7})$/;
+  const companyRegexLv = /^(?:SIA|Sabiedrība ar ierobežotu atbildību)\s+/;
+  const ibanRegexLv = /^LV\d{2}[A-Z0-9]{4}\d{13}$/;
+  const personalCodeLv = /^\d{6}-?\d{5}$/;
+  const addressRegexLv = /\biela\b/i;
+  const dateRegexLvWords = /^\d{4}\.\s*gada\s*(?:\d{1,2}\.\s*)?[a-zāčēģīķļņšūž]+/i;
+  const dateRegexDots = /^\d{1,2}\.\d{1,2}\.\d{4}\.?$/;
+  const regNoRegex = /^\d{11}$/;
+  const plateRegex = /^[A-Z]{2}-?\d{4}$/;
+  const postalCodeRegex = /^LV-\d{4}$/i;
+  const urlWithQueryRegex = /^https?:\/\/\S+\?\S+/i;
+
+  if (emailRegex.test(value)) {
+    return "email";
+  }
+  if (emailDisplayRegex.test(value)) {
+    return "email";
+  }
+  if (region === "lv" && phoneRegexLv.test(value.replace(/\s+/g, ""))) {
+    return "phone";
+  }
+  if (region === "lv" && companyRegexLv.test(value)) {
+    return "company";
+  }
+  if (region === "lv" && ibanRegexLv.test(value.replace(/\s+/g, ""))) {
+    return "iban";
+  }
+  if (region === "lv" && personalCodeLv.test(value.replace(/\s+/g, ""))) {
+    return "personal_code";
+  }
+  if (region === "lv" && addressRegexLv.test(value)) {
+    return "address";
+  }
+  if (region === "lv" && (dateRegexLvWords.test(value) || dateRegexDots.test(value))) {
+    return "date";
+  }
+  if (region === "lv" && postalCodeRegex.test(value.replace(/\s+/g, ""))) {
+    return "postal_code";
+  }
+  if (region === "lv" && regNoRegex.test(value)) {
+    return "registration_number";
+  }
+  if (region === "lv" && plateRegex.test(value.replace(/\s+/g, ""))) {
+    return "vehicle_plate";
+  }
+  if (urlWithQueryRegex.test(value)) {
+    return "url";
+  }
+  return "value";
+}
+
+function randomSuffix() {
+  return Math.random().toString(36).slice(2, 6);
+}
+
+function extractSensitiveCandidates(text, region) {
+  const candidates = [];
+  const source = maskExistingPlaceholders(text);
+
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  for (const match of source.matchAll(emailRegex)) {
+    candidates.push({ type: "email", value: match[0] });
+  }
+
+  const emailDisplayRegex = /\b[^<\n]{0,60}<\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\s*>/g;
+  for (const match of source.matchAll(emailDisplayRegex)) {
+    candidates.push({ type: "email", value: match[0].trim() });
+  }
+
+  const urlWithQueryRegex = /https?:\/\/\S+\?\S+/gi;
+  for (const match of source.matchAll(urlWithQueryRegex)) {
+    candidates.push({ type: "url", value: match[0].trim() });
+  }
+
+  if (region === "lv") {
+    const phoneRegex = /(?:\+371|371)?[\s-]?(?:2\d{7}|6\d{7})/g;
+    for (const match of source.matchAll(phoneRegex)) {
+      const cleaned = match[0].replace(/\s+/g, " ").trim();
+      candidates.push({ type: "phone", value: cleaned });
+    }
+
+    const companyRegex = /\b(?:SIA|Sabiedrība ar ierobežotu atbildību)\s+[A-ZĀČĒĢĪĶĻŅŠŪŽ0-9][^,\n]{1,60}/g;
+    for (const match of source.matchAll(companyRegex)) {
+      candidates.push({ type: "company", value: match[0].trim() });
+    }
+
+    const ibanRegex = /\bLV\d{2}[A-Z0-9]{4}\d{13}\b/g;
+    for (const match of source.matchAll(ibanRegex)) {
+      candidates.push({ type: "iban", value: match[0].trim() });
+    }
+
+    const personalCodeRegex = /\b\d{6}-?\d{5}\b/g;
+    for (const match of source.matchAll(personalCodeRegex)) {
+      candidates.push({ type: "personal_code", value: match[0].trim() });
+    }
+
+    const addressRegex =
+      /\b[^\n,]{1,60}\biela\b\s+\d+[a-zA-Z]?(?:-\d+[a-zA-Z]?)?(?:,\s*[^\n,]{1,80}){0,2}/gi;
+    for (const match of source.matchAll(addressRegex)) {
+      const cleaned = match[0].replace(/^\s*adrese\s*:\s*/i, "").trim();
+      candidates.push({ type: "address", value: cleaned });
+    }
+
+    const dateWordsRegex = /\b\d{4}\.\s*gada\s*(?:\d{1,2}\.\s*)?[a-zāčēģīķļņšūž]+\b/gi;
+    for (const match of source.matchAll(dateWordsRegex)) {
+      candidates.push({ type: "date", value: match[0].trim() });
+    }
+
+    const dateDotsRegex = /\b\d{1,2}\.\d{1,2}\.\d{4}\.?\b/g;
+    for (const match of source.matchAll(dateDotsRegex)) {
+      candidates.push({ type: "date", value: match[0].trim() });
+    }
+
+    const postalCodeRegex = /\bLV-\d{4}\b/gi;
+    for (const match of source.matchAll(postalCodeRegex)) {
+      candidates.push({ type: "postal_code", value: match[0].trim().toUpperCase() });
+    }
+
+    const regNoRegex = /\b\d{11}\b/g;
+    for (const match of source.matchAll(regNoRegex)) {
+      candidates.push({ type: "registration_number", value: match[0].trim() });
+    }
+
+    const plateRegex = /\b[A-Z]{2}-?\d{4}\b/g;
+    for (const match of source.matchAll(plateRegex)) {
+      candidates.push({ type: "vehicle_plate", value: match[0].trim() });
+    }
+  }
+
+  return candidates;
+}
+
+function buildSnippet(text, value) {
+  const index = text.indexOf(value);
+  if (index === -1) {
+    return escapeHtml(text.slice(0, 200));
+  }
+  const start = Math.max(0, index - 60);
+  const end = Math.min(text.length, index + value.length + 60);
+  const prefix = escapeHtml(text.slice(start, index));
+  const match = escapeHtml(text.slice(index, index + value.length));
+  const suffix = escapeHtml(text.slice(index + value.length, end));
+  return `${prefix}<mark>${match}</mark>${suffix}`;
+}
+
+function startDetectionQueue(candidates) {
+  const unique = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!seen.has(candidate.value)) {
+      seen.add(candidate.value);
+      unique.push(candidate);
+    }
+  }
+  state.detectQueue = unique;
+  state.detectIndex = 0;
+  state.detecting = true;
+}
+
+async function applyDetectionCandidate(candidate) {
+  const file = getActiveFile();
+  const project = getActiveProject();
+  if (!file || !project) {
+    return;
+  }
+
+  const existing = getProjectVariables().find((entry) => entry.value === candidate.value);
+  let name = existing?.name;
+  if (!name) {
+    const base = suggestVariableNameForValue(candidate.value, state.region);
+    name = createUniqueVariableName(`${base}_${randomSuffix()}`);
+    project.variables = [...getProjectVariables(), { name, value: candidate.value }];
+    await persistProject(project);
+  }
+
+  const placeholder = `{${name}}`;
+  const count = SanitizerCore.countOccurrences(file.sanitizedContent, candidate.value);
+  if (count > 0) {
+    file.sanitizedContent = SanitizerCore.replaceAllExact(file.sanitizedContent, candidate.value, placeholder);
+    await persistFile(file, `Applied ${placeholder} to ${count} match(es).`);
+  } else {
+    await persistFile(file, `No matches found for ${placeholder}.`);
+  }
+}
+
+function showNextDetectionCandidate() {
+  if (!state.detecting) {
+    return;
+  }
+  const candidate = state.detectQueue[state.detectIndex];
+  if (!candidate) {
+    state.detecting = false;
+    els.detectModal.close();
+    setStatus("Detection complete.");
+    return;
+  }
+  const file = getActiveFile();
+  if (!file) {
+    state.detecting = false;
+    els.detectModal.close();
+    return;
+  }
+  els.detectType.textContent = candidate.type;
+  els.detectValue.textContent = candidate.value;
+  els.detectSnippet.innerHTML = buildSnippet(file.sanitizedContent, candidate.value);
+  els.detectModal.showModal();
+}
+
+async function detectSensitiveData() {
+  const file = getActiveFile();
+  const project = getActiveProject();
+  if (!file || !project) {
+    return;
+  }
+
+  const candidates = extractSensitiveCandidates(file.sanitizedContent, state.region);
+  if (candidates.length === 0) {
+    setStatus("No sensitive data detected.");
+    return;
+  }
+
+  startDetectionQueue(candidates);
+  showNextDetectionCandidate();
+}
 
 async function copySanitizedText() {
   const file = getActiveFile();
@@ -1182,6 +1558,46 @@ async function exportSanitizedToDocx() {
   }
 }
 
+async function exportSanitizedToHtml() {
+  const file = getActiveFile();
+  if (!file) {
+    return;
+  }
+  const htmlBody = renderMarkdown(file.sanitizedContent);
+  const html = `<!doctype html><html><head><meta charset=\"utf-8\"></head><body>${htmlBody}</body></html>`;
+  const blob = new Blob([html], { type: "text/html" });
+  const href = URL.createObjectURL(blob);
+  const link = window.document.createElement("a");
+  link.href = href;
+  link.download = file.name.replace(/\.[^/.]+$/, "") + ".html";
+  window.document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  setStatus(`Exported ${link.download}.`);
+}
+
+async function deleteAllData() {
+  if (!window.confirm("This will permanently delete all local projects and files. Continue?")) {
+    return;
+  }
+  await deleteDatabase();
+  state.projects = [];
+  state.files = [];
+  state.activeProjectId = null;
+  state.activeFileId = null;
+  await loadInitialState();
+  setStatus("All local data cleared.");
+}
+
+function deleteDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(DB_NAME);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+
 async function parseImportedFile(file) {
   const lowerName = file.name.toLowerCase();
 
@@ -1266,6 +1682,7 @@ function bindEvents() {
   els.projectsViewBtn.addEventListener("click", () => showSidebarView("projects"));
   els.filesViewBtn.addEventListener("click", () => showSidebarView("files"));
   els.variablesViewBtn.addEventListener("click", () => showSidebarView("variables"));
+  els.settingsViewBtn.addEventListener("click", () => showSidebarView("settings"));
 
   els.newProjectBtn.addEventListener("click", async () => {
     await promptNewProject();
@@ -1331,6 +1748,55 @@ function bindEvents() {
     await createVariableFromSelection();
   });
 
+  els.regionSelect.addEventListener("change", () => {
+    state.region = els.regionSelect.value;
+    saveUiState();
+  });
+
+  els.retentionSelect.addEventListener("change", () => {
+    state.retention = els.retentionSelect.value;
+    if (state.retention === "clear_on_next_load") {
+      window.localStorage.setItem(CLEAR_ON_NEXT_LOAD_KEY, "1");
+    } else {
+      window.localStorage.removeItem(CLEAR_ON_NEXT_LOAD_KEY);
+    }
+    saveUiState();
+  });
+
+  els.exportFormatSelect.addEventListener("change", () => {
+    state.exportFormat = els.exportFormatSelect.value;
+    applyExportFormatSetting();
+  });
+
+  els.clearDataBtn.addEventListener("click", async () => {
+    await deleteAllData();
+  });
+
+  els.detectSensitiveBtn.addEventListener("click", async () => {
+    await detectSensitiveData();
+  });
+
+  els.detectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const candidate = state.detectQueue[state.detectIndex];
+    if (candidate) {
+      await applyDetectionCandidate(candidate);
+    }
+    state.detectIndex += 1;
+    showNextDetectionCandidate();
+  });
+
+  els.detectSkipBtn.addEventListener("click", () => {
+    state.detectIndex += 1;
+    showNextDetectionCandidate();
+  });
+
+  els.detectStopBtn.addEventListener("click", () => {
+    state.detecting = false;
+    els.detectModal.close();
+    setStatus("Detection stopped.");
+  });
+
   els.restoreAllBtn.addEventListener("click", async () => {
     await restoreAllVariables();
   });
@@ -1364,6 +1830,10 @@ function bindEvents() {
     await exportSanitizedToDocx();
   });
 
+  els.exportHtmlBtn.addEventListener("click", async () => {
+    await exportSanitizedToHtml();
+  });
+
   els.openImportModalBtn.addEventListener("click", openImportModal);
   els.closeImportModalBtn.addEventListener("click", closeImportModal);
 
@@ -1383,6 +1853,10 @@ async function bootstrap() {
   setEditorEnabled(false);
 
   try {
+    if (window.localStorage.getItem(CLEAR_ON_NEXT_LOAD_KEY) === "1") {
+      await deleteDatabase();
+      window.localStorage.removeItem(CLEAR_ON_NEXT_LOAD_KEY);
+    }
     await loadInitialState();
     setSidebarView(state.activeSidebarView);
     applySidebarState();

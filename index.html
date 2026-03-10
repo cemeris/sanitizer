@@ -17,6 +17,7 @@
           <button id="projectsViewBtn" type="button" class="ghost">Projects</button>
           <button id="filesViewBtn" type="button" class="ghost">Files</button>
           <button id="variablesViewBtn" type="button" class="ghost">Variables</button>
+          <button id="settingsViewBtn" type="button" class="ghost">Settings</button>
           <button id="openImportModalBtn" type="button">Import File(s)</button>
         </div>
       </header>
@@ -41,6 +42,31 @@
             <h2>Project Variables</h2>
             <ul id="variableList" class="list variable-list"></ul>
           </section>
+
+          <section id="settingsView" class="sidebar-view hidden">
+            <h2>Settings</h2>
+            <label class="select">
+              Region
+              <select id="regionSelect">
+                <option value="lv" selected>Latvia</option>
+              </select>
+            </label>
+            <label class="select">
+              Data retention
+              <select id="retentionSelect">
+                <option value="keep" selected>Keep data</option>
+                <option value="clear_on_next_load">Clear on next load</option>
+              </select>
+            </label>
+            <label class="select">
+              Export formats
+              <select id="exportFormatSelect">
+                <option value="docx" selected>DOCX only</option>
+                <option value="docx_html">DOCX + HTML</option>
+              </select>
+            </label>
+            <button id="clearDataBtn" type="button" class="ghost danger full">Clear All Data Now</button>
+          </section>
         </aside>
 
         <section class="panel editor-area">
@@ -55,10 +81,12 @@
                 <input id="replaceAllToggle" type="checkbox" checked />
                 Replace all exact repetitions
               </label>
+              <button id="detectSensitiveBtn" type="button" class="ghost">Auto-Detect Sensitive</button>
               <button id="restoreAllBtn" type="button" class="ghost">Restore All</button>
               <button id="applyAllBtn" type="button" class="ghost">Apply All Variables</button>
               <button id="copySanitizedBtn" type="button" class="ghost">Copy Sanitized Text</button>
               <button id="exportDocxBtn" type="button" class="ghost">Export DOCX</button>
+              <button id="exportHtmlBtn" type="button" class="ghost hidden">Export HTML</button>
             </div>
           </div>
 
@@ -104,6 +132,23 @@
       </form>
     </dialog>
 
+    <dialog id="detectModal" class="modal">
+      <form method="dialog" class="modal-card" id="detectForm">
+        <h2>Confirm Sensitive Data</h2>
+        <p class="muted">Review each detected item before applying a variable.</p>
+        <div class="detect-summary">
+          <span id="detectType" class="badge"></span>
+          <span id="detectValue" class="detect-value"></span>
+        </div>
+        <div id="detectSnippet" class="detect-snippet"></div>
+        <div class="modal-actions">
+          <button id="detectStopBtn" type="button" class="ghost">Stop</button>
+          <button id="detectSkipBtn" type="button" class="ghost">Skip</button>
+          <button id="detectApplyBtn" type="submit">Apply</button>
+        </div>
+      </form>
+    </dialog>
+
     <footer class="app-footer">
       <p>
         &copy; 2026 Vitālijs Čemeris. Developed by Vitālijs Čemeris.
@@ -112,9 +157,9 @@
       <span id="status" class="status status-hidden"></span>
     </footer>
 
-    <script src="./vendor/mammoth.browser.min.js?v=0.1.0"></script>
-    <script src="./vendor/docx.iife.js?v=0.1.0"></script>
-    <script src="./sanitizer-core.js?v=0.1.0"></script>
-    <script src="./app.js?v=0.1.0"></script>
+    <script src="./vendor/mammoth.browser.min.js?v=0.1.1"></script>
+    <script src="./vendor/docx.iife.js?v=0.1.1"></script>
+    <script src="./sanitizer-core.js?v=0.1.1"></script>
+    <script src="./app.js?v=0.1.1"></script>
   </body>
 </html>
