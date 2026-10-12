@@ -9,6 +9,7 @@ Open-source browser app for sanitizing private data in markdown-based content be
 - Markdown-first editing workflow
 - Primary input is paste/import into markdown editor
 - Optional `.docx` import via local `mammoth.js`
+- Offline `.xlsx`, `.csv`, and `.tsv` import/export using browser-native APIs
 
 ## Run
 
@@ -19,7 +20,7 @@ Open `index.html` in a browser, or serve this folder with any static file server
 - IndexedDB project storage (multiple projects and files)
 - Original/sanitized content separation per file
 - Modal-based file import from a single button
-- Multi-file support: `.md`, `.markdown`, `.txt`, `.html`, `.htm`, `.docx`
+- Multi-file support: `.md`, `.markdown`, `.txt`, `.html`, `.htm`, `.docx`, `.xlsx`, `.csv`, `.tsv`
 - Markdown editor + live preview
 - Variable creation from selected text (`{variable_name}`)
 - Replace-all exact repetitions
@@ -29,6 +30,7 @@ Open `index.html` in a browser, or serve this folder with any static file server
 - Auto-detects: IBAN, personal code, address, dates, registration numbers, vehicle plates, postal codes, URLs with query params
 - Copy sanitized output
 - Export sanitized markdown to `.docx` (basic formatting)
+- Export sanitized Markdown tables to `.xlsx` with one worksheet per table/heading
 - Autosave-only workflow (no manual Save button)
 - Delete support for active project, active file, and variables
 
@@ -64,6 +66,8 @@ node --test tests/sanitizer-core.test.js
 - License text: `third_party_licenses/MAMMOTH-LICENSE.txt`.
 - License text: `third_party_licenses/DOCX-LICENSE.txt`.
 - Attribution summary: `THIRD_PARTY_NOTICES.md`.
+
+Excel support is limited to modern `.xlsx` workbooks and delimited text files. Legacy binary `.xls` files are intentionally unsupported. The XLSX reader/writer is implemented in `app.js` with browser-native ZIP/XML APIs, so workbook data is not uploaded and the app remains functional offline.
 
 ## Planning docs
 

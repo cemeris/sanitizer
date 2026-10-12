@@ -20,3 +20,7 @@ license conditions, and disclaimer for mammoth.js via the included license file.
 - License: MIT
 - Local file used: `vendor/docx.iife.js`
 - License text: `third_party_licenses/DOCX-LICENSE.txt`
+
+## Excel import/export
+
+Modern `.xlsx` import/export uses browser-native `DecompressionStream`, `DOMParser`, `TextEncoder`, and ZIP/XML serialization implemented in `app.js`. No third-party Excel runtime or network service is used. Legacy binary `.xls` files are intentionally unsupported.

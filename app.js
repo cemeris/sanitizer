@@ -66,6 +66,7 @@ const els = {
   copySanitizedBtn: document.getElementById("copySanitizedBtn"),
   exportDocxBtn: document.getElementById("exportDocxBtn"),
   exportHtmlBtn: document.getElementById("exportHtmlBtn"),
+  exportXlsxBtn: document.getElementById("exportXlsxBtn"),
 };
 
 function setStatus(message) {
@@ -429,17 +430,18 @@ function inlineFromNode(node) {
     return href ? `[${text}](${href})` : text;
   }
   if (tag === "br") {
-    return "<br>";
+    return "\n";
   }
   if (tag === "p") {
-    return [...node.childNodes].map(inlineFromNode).join("") + "<br>";
+    return [...node.childNodes].map(inlineFromNode).join("") + "\n";
   }
   return [...node.childNodes].map(inlineFromNode).join("");
 }
 
 function sanitizeTableCell(text) {
   return text
-    .replace(/\n+/g, "<br>")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/\n+/g, " ")
     .replace(/\|/g, "\\|")
     .replace(/\s+/g, " ")
     .trim();
@@ -528,13 +530,16 @@ function setEditorEnabled(enabled) {
   els.copySanitizedBtn.disabled = !enabled;
   els.exportDocxBtn.disabled = !enabled;
   els.exportHtmlBtn.disabled = !enabled;
+  els.exportXlsxBtn.disabled = !enabled;
   els.deleteFileBtn.disabled = !enabled;
   els.detectSensitiveBtn.disabled = !enabled;
 }
 
 function applyExportFormatSetting() {
   const showHtml = state.exportFormat === "docx_html";
+  const showXlsx = state.exportFormat === "docx_xlsx";
   els.exportHtmlBtn.classList.toggle("hidden", !showHtml);
+  els.exportXlsxBtn.classList.toggle("hidden", !showXlsx);
   saveUiState();
 }
 
@@ -750,7 +755,7 @@ async function loadInitialState() {
   els.regionSelect.value = state.region;
   state.retention = saved?.retention === "clear_on_next_load" ? "clear_on_next_load" : "keep";
   els.retentionSelect.value = state.retention;
-  state.exportFormat = saved?.exportFormat === "docx_html" ? "docx_html" : "docx";
+  state.exportFormat = saved?.exportFormat === "docx_html" || saved?.exportFormat === "docx_xlsx" ? saved.exportFormat : "docx";
   els.exportFormatSelect.value = state.exportFormat;
   applyExportFormatSetting();
 
@@ -1558,6 +1563,235 @@ async function exportSanitizedToDocx() {
   }
 }
 
+function xmlEscape(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function markdownCellEscape(value) {
+  return String(value).replaceAll("|", "\\|").replaceAll(/\r?\n/g, " ").trim();
+}
+
+function csvToRows(text, delimiter = ",") {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  const source = String(text).replace(/^\uFEFF/, "");
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (char === '"') {
+      if (quoted && next === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === delimiter && !quoted) {
+      row.push(cell);
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell);
+      if (row.some((value) => value !== "") || rows.length > 0) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  if (cell !== "" || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function rowsToMarkdown(rows, title) {
+  const width = Math.max(1, ...rows.map((row) => row.length));
+  const normalized = rows.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? ""));
+  const header = normalized[0] || Array(width).fill("");
+  const lines = [`# ${title}`, "", `| ${header.map(markdownCellEscape).join(" | ")} |`, `| ${header.map(() => "---").join(" | ")} |`];
+  for (const row of normalized.slice(1)) {
+    lines.push(`| ${row.map(markdownCellEscape).join(" | ")} |`);
+  }
+  return lines.join("\n");
+}
+
+function parseMarkdownTables(markdown) {
+  const lines = String(markdown).replaceAll("\r\n", "\n").split("\n");
+  const tables = [];
+  let heading = "Sheet1";
+  for (let index = 0; index < lines.length; index += 1) {
+    const headingMatch = lines[index].match(/^#{1,6}\s+(.+)$/);
+    if (headingMatch) heading = headingMatch[1].trim() || "Sheet1";
+    if (!lines[index].includes("|") || !lines[index + 1] || !/^\s*\|?\s*:?-{3,}/.test(lines[index + 1])) continue;
+    const split = (line) => {
+      let value = line.trim();
+      if (value.startsWith("|")) value = value.slice(1);
+      if (value.endsWith("|")) value = value.slice(0, -1);
+      return value.split(/(?<!\\)\|/).map((cell) => cell.replaceAll("\\|", "|").trim());
+    };
+    const rows = [split(lines[index])];
+    index += 2;
+    while (index < lines.length && lines[index].includes("|")) {
+      rows.push(split(lines[index]));
+      index += 1;
+    }
+    tables.push({ name: heading, rows });
+    index -= 1;
+  }
+  return tables;
+}
+
+function stripMarkdownCell(value) {
+  return String(value)
+    .replace(/^`|`$/g, "")
+    .replace(/^\*\*|\*\*$/g, "")
+    .replace(/^\*|\*$/g, "")
+    .replace(/^\[([^\]]+)\]\([^)]*\)$/, "$1")
+    .trim();
+}
+
+function columnName(index) {
+  let result = "";
+  let value = index + 1;
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    value = Math.floor((value - 1) / 26);
+  }
+  return result;
+}
+
+function makeWorksheetXml(rows) {
+  const rowXml = rows.map((row, rowIndex) => {
+    const cells = row.map((raw, colIndex) => {
+      const value = stripMarkdownCell(raw);
+      if (!value) return `<c r="${columnName(colIndex)}${rowIndex + 1}" t="inlineStr"><is><t></t></is></c>`;
+      const ref = `${columnName(colIndex)}${rowIndex + 1}`;
+      if (/^=[^=]/.test(value)) return `<c r="${ref}"><f>${xmlEscape(value.slice(1))}</f></c>`;
+      if (/^-?(?:\d+\.?\d*|\.\d+)$/.test(value)) return `<c r="${ref}"><v>${value}</v></c>`;
+      return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
+    }).join("");
+    return `<row r="${rowIndex + 1}">${cells}</row>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowXml}</sheetData></worksheet>`;
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeU16(view, offset, value) { view.setUint16(offset, value, true); }
+function writeU32(view, offset, value) { view.setUint32(offset, value >>> 0, true); }
+
+function createStoredZip(entries) {
+  const encoder = new TextEncoder();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, content] of entries) {
+    const nameBytes = encoder.encode(name);
+    const data = content instanceof Uint8Array ? content : encoder.encode(content);
+    const local = new Uint8Array(30 + nameBytes.length + data.length);
+    const view = new DataView(local.buffer);
+    writeU32(view, 0, 0x04034b50); writeU16(view, 4, 20); writeU16(view, 6, 0x800); writeU16(view, 8, 0);
+    writeU16(view, 10, 0); writeU16(view, 12, 0); writeU32(view, 14, crc32(data)); writeU32(view, 18, data.length); writeU32(view, 22, data.length);
+    writeU16(view, 26, nameBytes.length); writeU16(view, 28, 0); local.set(nameBytes, 30); local.set(data, 30 + nameBytes.length);
+    parts.push(local);
+    const record = { nameBytes, data, offset };
+    central.push(record);
+    offset += local.length;
+  }
+  const centralParts = central.map(({ nameBytes, data, offset: entryOffset }) => {
+    const record = new Uint8Array(46 + nameBytes.length);
+    const view = new DataView(record.buffer);
+    writeU32(view, 0, 0x02014b50); writeU16(view, 4, 20); writeU16(view, 6, 20); writeU16(view, 8, 0x800); writeU16(view, 10, 0);
+    writeU16(view, 12, 0); writeU16(view, 14, 0); writeU32(view, 16, crc32(data)); writeU32(view, 20, data.length); writeU32(view, 24, data.length);
+    writeU16(view, 28, nameBytes.length); writeU16(view, 30, 0); writeU16(view, 32, 0); writeU16(view, 34, 0); writeU16(view, 36, 0); writeU32(view, 38, 0); writeU32(view, 42, entryOffset);
+    record.set(nameBytes, 46);
+    return record;
+  });
+  const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+  const end = new Uint8Array(22); const endView = new DataView(end.buffer);
+  writeU32(endView, 0, 0x06054b50); writeU16(endView, 8, central.length); writeU16(endView, 10, central.length); writeU32(endView, 12, centralSize); writeU32(endView, 16, offset); writeU16(endView, 20, 0);
+  return new Blob([...parts, ...centralParts, end], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+function makeXlsxBlob(tables) {
+  const encoder = new TextEncoder();
+  const safeNames = tables.map((table, index) => {
+    const base = (table.name || `Sheet${index + 1}`).replace(/[\\/?*:[\]]/g, " ").trim().slice(0, 31) || `Sheet${index + 1}`;
+    return `${base}${tables.slice(0, index).some((item) => item.name === base) ? ` ${index + 1}` : ""}`;
+  });
+  const sheetItems = tables.map((table, index) => [`xl/worksheets/sheet${index + 1}.xml`, makeWorksheetXml(table.rows)]);
+  const workbookSheets = safeNames.map((name, index) => `<sheet name="${xmlEscape(name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
+  const rels = safeNames.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
+  const entries = [
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${tables.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`],
+    ...sheetItems,
+  ];
+  return createStoredZip(entries);
+}
+
+async function readZipEntries(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer); const view = new DataView(arrayBuffer); const decoder = new TextDecoder();
+  let eocd = bytes.length - 22;
+  while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd -= 1;
+  if (eocd < 0) throw new Error("The workbook is not a valid XLSX ZIP package.");
+  const count = view.getUint16(eocd + 10, true); const centralOffset = view.getUint32(eocd + 16, true); let cursor = centralOffset;
+  const entries = new Map();
+  for (let index = 0; index < count; index += 1) {
+    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("The workbook has an invalid ZIP directory.");
+    const method = view.getUint16(cursor + 10, true); const compressedSize = view.getUint32(cursor + 20, true); const nameLength = view.getUint16(cursor + 28, true); const extraLength = view.getUint16(cursor + 30, true); const commentLength = view.getUint16(cursor + 32, true); const localOffset = view.getUint32(cursor + 42, true);
+    const name = decoder.decode(bytes.slice(cursor + 46, cursor + 46 + nameLength)); cursor += 46 + nameLength + extraLength + commentLength;
+    const localNameLength = view.getUint16(localOffset + 26, true); const localExtraLength = view.getUint16(localOffset + 28, true); const start = localOffset + 30 + localNameLength + localExtraLength; const compressed = bytes.slice(start, start + compressedSize);
+    if (method === 0) entries.set(name, decoder.decode(compressed));
+    else if (method === 8) entries.set(name, decoder.decode(await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer()));
+    else throw new Error(`Unsupported ZIP compression method: ${method}.`);
+  }
+  return entries;
+}
+
+function xmlElements(xml, tag) { return [...xml.getElementsByTagNameNS("*", tag)]; }
+function xmlText(node) { return node ? node.textContent || "" : ""; }
+
+async function xlsxToMarkdown(arrayBuffer) {
+  const entries = await readZipEntries(arrayBuffer); const parser = new DOMParser(); const workbook = parser.parseFromString(entries.get("xl/workbook.xml") || "", "application/xml");
+  const relsXml = parser.parseFromString(entries.get("xl/_rels/workbook.xml.rels") || "", "application/xml"); const relTargets = new Map(xmlElements(relsXml, "Relationship").map((rel) => [rel.getAttribute("Id"), rel.getAttribute("Target")]));
+  const shared = entries.get("xl/sharedStrings.xml") ? parser.parseFromString(entries.get("xl/sharedStrings.xml"), "application/xml") : null; const sharedValues = shared ? xmlElements(shared, "si").map(xmlText) : [];
+  const sheets = xmlElements(workbook, "sheet"); const markdown = [];
+  for (const sheet of sheets) {
+    const target = relTargets.get(sheet.getAttribute("r:id")); if (!target) continue;
+    const path = target.startsWith("/") ? target.slice(1) : `xl/${target}`; const sheetXml = parser.parseFromString(entries.get(path) || "", "application/xml"); const rows = [];
+    for (const rowNode of xmlElements(sheetXml, "row")) {
+      const cells = []; for (const cell of xmlElements(rowNode, "c")) { const ref = cell.getAttribute("r") || "A1"; const col = ref.match(/^[A-Z]+/)[0]; let colIndex = 0; for (const char of col) colIndex = colIndex * 26 + char.charCodeAt(0) - 64; colIndex -= 1; while (cells.length <= colIndex) cells.push(""); const formula = xmlElements(cell, "f")[0]; const type = cell.getAttribute("t"); let value = formula ? `=${xmlText(formula)}` : xmlText(xmlElements(cell, "v")[0] || xmlElements(cell, "t")[0]); if (type === "s") value = sharedValues[Number(value)] || ""; if (type === "b") value = value === "1" ? "TRUE" : "FALSE"; cells[colIndex] = value; } rows.push(cells);
+    }
+    markdown.push(rowsToMarkdown(rows, sheet.getAttribute("name") || `Sheet${markdown.length + 1}`));
+  }
+  return markdown.join("\n\n");
+}
+
+async function exportSanitizedToXlsx() {
+  const file = getActiveFile(); if (!file) return;
+  try { const tables = parseMarkdownTables(file.sanitizedContent); const fallback = tables.length ? tables : [{ name: file.name.replace(/\.[^/.]+$/, "") || "Sheet1", rows: file.sanitizedContent.split(/\r?\n/).map((line) => [line]) }]; const blob = makeXlsxBlob(fallback); const href = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = href; link.download = file.name.replace(/\.[^/.]+$/, "") + ".xlsx"; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(href); setStatus(`Exported ${link.download}.`); }
+  catch (error) { setStatus(`XLSX export failed: ${error instanceof Error ? error.message : String(error)}`); }
+}
+
 async function exportSanitizedToHtml() {
   const file = getActiveFile();
   if (!file) {
@@ -1600,6 +1834,34 @@ function deleteDatabase() {
 
 async function parseImportedFile(file) {
   const lowerName = file.name.toLowerCase();
+
+  if (lowerName.endsWith(".xls")) {
+    throw new Error("Legacy .xls files are not supported offline. Save the workbook as .xlsx or .csv first.");
+  }
+
+  if (lowerName.endsWith(".xlsx")) {
+    const markdown = await xlsxToMarkdown(await file.arrayBuffer());
+    return {
+      name: file.name,
+      type: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      originalContent: markdown,
+      sanitizedContent: markdown,
+      warningCount: 0,
+    };
+  }
+
+  if (lowerName.endsWith(".csv") || lowerName.endsWith(".tsv")) {
+    const text = await file.text();
+    const rows = csvToRows(text, lowerName.endsWith(".tsv") ? "\t" : ",");
+    const markdown = rowsToMarkdown(rows, file.name.replace(/\.[^/.]+$/, "") || "Sheet1");
+    return {
+      name: file.name,
+      type: file.type || (lowerName.endsWith(".tsv") ? "text/tab-separated-values" : "text/csv"),
+      originalContent: markdown,
+      sanitizedContent: markdown,
+      warningCount: 0,
+    };
+  }
 
   if (lowerName.endsWith(".docx")) {
     const arrayBuffer = await file.arrayBuffer();
@@ -1832,6 +2094,10 @@ function bindEvents() {
 
   els.exportHtmlBtn.addEventListener("click", async () => {
     await exportSanitizedToHtml();
+  });
+
+  els.exportXlsxBtn.addEventListener("click", async () => {
+    await exportSanitizedToXlsx();
   });
 
   els.openImportModalBtn.addEventListener("click", openImportModal);

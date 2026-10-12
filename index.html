@@ -63,6 +63,7 @@
               <select id="exportFormatSelect">
                 <option value="docx" selected>DOCX only</option>
                 <option value="docx_html">DOCX + HTML</option>
+              <option value="docx_xlsx">DOCX + XLSX</option>
               </select>
             </label>
             <button id="clearDataBtn" type="button" class="ghost danger full">Clear All Data Now</button>
@@ -87,6 +88,7 @@
               <button id="copySanitizedBtn" type="button" class="ghost">Copy Sanitized Text</button>
               <button id="exportDocxBtn" type="button" class="ghost">Export DOCX</button>
               <button id="exportHtmlBtn" type="button" class="ghost hidden">Export HTML</button>
+              <button id="exportXlsxBtn" type="button" class="ghost hidden">Export XLSX</button>
             </div>
           </div>
 
@@ -123,8 +125,8 @@
     <dialog id="importModal" class="modal">
       <form method="dialog" class="modal-card" id="importForm">
         <h2>Import Files</h2>
-        <p class="muted">Supports multiple files: <code>.md</code>, <code>.txt</code>, <code>.html</code>, <code>.htm</code>, <code>.docx</code>.</p>
-        <input id="filePicker" type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.docx,text/plain,text/markdown,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        <p class="muted">Supports multiple files: <code>.md</code>, <code>.txt</code>, <code>.html</code>, <code>.htm</code>, <code>.docx</code>, <code>.xlsx</code>, <code>.csv</code>, <code>.tsv</code>. Legacy binary <code>.xls</code> is not supported.</p>
+        <input id="filePicker" type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.docx,.xlsx,.csv,.tsv,text/plain,text/markdown,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values" />
         <div class="modal-actions">
           <button id="closeImportModalBtn" type="button" class="ghost">Cancel</button>
           <button id="confirmImportBtn" type="submit">Import</button>
