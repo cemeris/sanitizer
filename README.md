@@ -28,6 +28,8 @@ Open `index.html` in a browser, or serve this folder with any static file server
 - Project-scoped variables usable across all files
 - Auto-detect sensitive data (emails, LV phone numbers, LV company prefixes)
 - Auto-detects: IBAN, personal code, address, dates, registration numbers, vehicle plates, postal codes, URLs with query params
+- Auto-detects configured Latvian first-name + surname pairs, including common case forms
+- Detects markdown tables before sanitization and scans each cell independently, preserving table delimiters and escaped pipes
 - Copy sanitized output
 - Export sanitized markdown to `.docx` (basic formatting)
 - Export sanitized Markdown tables to `.xlsx` with one worksheet per table/heading
@@ -48,6 +50,10 @@ Open `index.html` in a browser, or serve this folder with any static file server
   - `:::center` ... `:::`
   - `:::right` ... `:::`
 - Variable shortcut: select text and press `Space` to create a variable (selection is trimmed)
+
+The local person-name dictionary is stored in `sanitizer-core.js` as a nested
+`first name -> surname -> forms` structure. Add a person there when a project
+needs additional names or inflection forms; no network request is made.
 
 ## Testing
 

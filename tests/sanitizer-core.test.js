@@ -63,3 +63,35 @@ test("variable name validation is deterministic", () => {
   assert.equal(core.isVariableNameValid("1name"), false);
   assert.equal(core.isVariableNameValid("client-name"), false);
 });
+
+test("detectPersonNames finds configured Latvian case forms", () => {
+  const result = core.detectPersonNames("Vēstule nosūtīta Jāņa Bērziņa vārdā, bet ne Jānisks Bērziņš.");
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].type, "person_name");
+  assert.equal(result[0].value, "Jāņa Bērziņa");
+  assert.equal(result[0].canonical, "Jānis Bērziņš");
+});
+
+test("person-name database is nested and supports multiple configured people", () => {
+  assert.ok(core.LATVIAN_PERSON_NAME_DATABASE.janis.berzins);
+  const result = core.detectPersonNames("Anna Kalniņa un Andra Ozola.");
+
+  assert.deepEqual(result.map((match) => match.value), ["Anna Kalniņa", "Andra Ozola"]);
+});
+
+test("markdown table cells are extracted without treating escaped pipes as delimiters", () => {
+  const markdown = "| Klients | Apraksts |\n| --- | --- |\n| Jānis Bērziņš | SIA Example \\| nodaļa |";
+  const cells = core.extractMarkdownTableCells(markdown);
+
+  assert.deepEqual(cells.map((cell) => cell.value), [
+    "Klients",
+    "Apraksts",
+    "Jānis Bērziņš",
+    "SIA Example \\| nodaļa",
+  ]);
+  const masked = core.maskMarkdownTables(markdown);
+  assert.match(masked, /^\|\s+\|\s+\|$/m);
+  assert.match(masked, /\\\|/);
+  assert.match(masked, /\| --- \| --- \|/);
+});

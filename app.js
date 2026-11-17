@@ -1075,6 +1075,9 @@ function suggestVariableNameForValue(value, region) {
   if (emailRegex.test(value)) {
     return "email";
   }
+  if (SanitizerCore.detectPersonNames(value).length > 0) {
+    return "person_name";
+  }
   if (emailDisplayRegex.test(value)) {
     return "email";
   }
@@ -1115,9 +1118,21 @@ function randomSuffix() {
   return Math.random().toString(36).slice(2, 6);
 }
 
-function extractSensitiveCandidates(text, region) {
+function extractSensitiveCandidates(text, region, options = {}) {
   const candidates = [];
-  const source = maskExistingPlaceholders(text);
+  const maskedPlaceholders = maskExistingPlaceholders(text);
+  const source = options.skipTableIsolation
+    ? maskedPlaceholders
+    : SanitizerCore.maskMarkdownTables(maskedPlaceholders);
+
+  for (const match of SanitizerCore.detectPersonNames(source)) {
+    candidates.push({
+      type: match.type,
+      value: match.value,
+      canonical: match.canonical,
+      personKey: match.personKey,
+    });
+  }
 
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
   for (const match of source.matchAll(emailRegex)) {
@@ -1186,6 +1201,12 @@ function extractSensitiveCandidates(text, region) {
     const plateRegex = /\b[A-Z]{2}-?\d{4}\b/g;
     for (const match of source.matchAll(plateRegex)) {
       candidates.push({ type: "vehicle_plate", value: match[0].trim() });
+    }
+  }
+
+  if (!options.skipTableIsolation) {
+    for (const cell of SanitizerCore.extractMarkdownTableCells(text)) {
+      candidates.push(...extractSensitiveCandidates(cell.value, region, { skipTableIsolation: true }));
     }
   }
 

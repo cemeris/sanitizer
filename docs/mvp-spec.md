@@ -77,6 +77,7 @@ Sanitize customer/private data in document content before sending text to cloud 
 - OCR/PDF parsing
 - AI API integration
 - Complex NLP/PII detection (beyond exact-match repetition)
+- Automatic recognition of arbitrary names not present in the local dictionary
 - Encryption at rest (candidate for post-MVP)
 
 ## Acceptance criteria
