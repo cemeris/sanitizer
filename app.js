@@ -2144,6 +2144,12 @@ async function bootstrap() {
       await deleteDatabase();
       window.localStorage.removeItem(CLEAR_ON_NEXT_LOAD_KEY);
     }
+    try {
+      const personNameDatabase = await PersonNameDatabase.load();
+      SanitizerCore.setPersonNameDatabase(personNameDatabase);
+    } catch (error) {
+      setStatus(`Person-name database unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await loadInitialState();
     setSidebarView(state.activeSidebarView);
     applySidebarState();

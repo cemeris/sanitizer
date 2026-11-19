@@ -1,10 +1,11 @@
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require("./person-name-database.js"));
     return;
   }
-  root.SanitizerCore = factory();
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  root.SanitizerCore = factory(root.PersonNameDatabase);
+})(typeof globalThis !== "undefined" ? globalThis : this, function (defaultDatabase) {
+  let activeDatabase = defaultDatabase;
   function countOccurrences(text, needle) {
     if (!needle) {
       return 0;
@@ -18,30 +19,6 @@
     }
     return text.split(value).join(replacement);
   }
-
-  // The database is intentionally local and explicit. Keep the outer shape
-  // nested (first name -> surname) so lookup does not require scanning every
-  // person in the dictionary. Forms are stored without case significance.
-  const LATVIAN_PERSON_NAME_DATABASE = Object.freeze({
-    janis: Object.freeze({
-      berzins: Object.freeze({ firstName: "Jānis", lastName: "Bērziņš", forms: ["Jānis Bērziņš", "Jāņa Bērziņa", "Jānim Bērziņam", "Jāni Bērziņu", "Jānī Bērziņā"] }),
-    }),
-    anna: Object.freeze({
-      kalnina: Object.freeze({ firstName: "Anna", lastName: "Kalniņa", forms: ["Anna Kalniņa", "Annas Kalniņas", "Annai Kalniņai", "Annu Kalniņu", "Annā Kalniņā"] }),
-    }),
-    andris: Object.freeze({
-      ozols: Object.freeze({ firstName: "Andris", lastName: "Ozols", forms: ["Andris Ozols", "Andra Ozola", "Andrim Ozolam", "Andri Ozolu", "Andrī Ozolā"] }),
-    }),
-    liga: Object.freeze({
-      ozolina: Object.freeze({ firstName: "Līga", lastName: "Ozoliņa", forms: ["Līga Ozoliņa", "Līgas Ozoliņas", "Līgai Ozoliņai", "Līgu Ozoliņu", "Līgā Ozoliņā"] }),
-    }),
-    ilze: Object.freeze({
-      jansone: Object.freeze({ firstName: "Ilze", lastName: "Jansone", forms: ["Ilze Jansone", "Ilzes Jansones", "Ilzei Jansonei", "Ilzi Jansoni", "Ilzē Jansone"] }),
-    }),
-    maris: Object.freeze({
-      liepins: Object.freeze({ firstName: "Māris", lastName: "Liepiņš", forms: ["Māris Liepiņš", "Māra Liepiņa", "Mārim Liepiņam", "Māri Liepiņu", "Mārī Liepiņā"] }),
-    }),
-  });
 
   function normalizeNamePart(value) {
     return String(value)
@@ -153,39 +130,127 @@
     return lines.join("\n");
   }
 
-  function buildPersonNameIndex(database = LATVIAN_PERSON_NAME_DATABASE) {
-    const entries = [];
-    for (const [firstKey, surnames] of Object.entries(database || {})) {
-      for (const [lastKey, person] of Object.entries(surnames || {})) {
-        const forms = [...new Set([...(person.forms || []), `${person.firstName} ${person.lastName}`])]
-          .filter(Boolean)
-          .sort((a, b) => b.length - a.length);
-        entries.push({
-          key: `${firstKey}:${lastKey}`,
-          canonical: `${person.firstName} ${person.lastName}`,
-          forms,
-          pattern: new RegExp(`(?<![\\p{L}])(?:${forms.map(escapeRegex).join("|")})(?![\\p{L}])`, "giu"),
-        });
+  function buildNameFormIndex(entries) {
+    const index = new Map();
+    for (const [key, entry] of Object.entries(entries || {})) {
+      for (const form of new Set([entry.canonical, ...(entry.forms || [])])) {
+        const normalized = normalizeNamePart(form);
+        const candidates = index.get(normalized) || [];
+        if (!candidates.some((candidate) => candidate.key === key)) {
+          candidates.push({ key, canonical: entry.canonical, gender: entry.gender, forms: entry.forms || [entry.canonical] });
+        }
+        index.set(normalized, candidates);
       }
     }
-    return entries;
+    return index;
   }
 
-  function detectPersonNames(text, database = LATVIAN_PERSON_NAME_DATABASE) {
+  function lookupName(index, value, preferredGender) {
+    const candidates = index.get(normalizeNamePart(value)) || [];
+    const exact = value.normalize("NFC").toLocaleLowerCase("lv-LV");
+    const exactCandidates = candidates.filter((candidate) => candidate.forms.some((form) => form.normalize("NFC").toLocaleLowerCase("lv-LV") === exact));
+    const genderCandidates = preferredGender
+      ? exactCandidates.filter((candidate) => {
+          const gender = String(candidate.gender || "").toUpperCase();
+          return preferredGender === "male" ? gender.includes("VĪR") || gender === "M" : gender.includes("SIEV") || gender === "F";
+        })
+      : [];
+    return genderCandidates[0] || exactCandidates[0] || candidates[0];
+  }
+
+  function looksLikeLatvianFirstName(value) {
+    return /^[A-ZĀČĒĢĪĶĻŅŠŪŽ][a-zāčēģīķļņšūž]+(?:s|š|is|us|a|e|i)$/.test(value);
+  }
+
+  function looksLikeLatvianSurname(value) {
+    return /(?:s|š|is|us|a|e|iņa|iņš|nieks|sons|one|āns|ēns)$/i.test(value);
+  }
+
+  function isExtendedKnownForm(value, index) {
+    const normalized = normalizeNamePart(value);
+    return [...index.keys()].some((known) => normalized.startsWith(known) && normalized.length > known.length);
+  }
+
+  function detectPersonNames(text, database) {
     const source = String(text || "");
+    const names = database || activeDatabase || { firstNames: {}, surnames: {} };
+    const firstIndex = buildNameFormIndex(names?.firstNames);
+    const surnameIndex = buildNameFormIndex(names?.surnames);
+    const tokenPattern = /(?<![\p{L}])([A-ZĀČĒĢĪĶĻŅŠŪŽ][\p{L}'’\-]*)(?![\p{L}])/gu;
+    const tokens = [...source.matchAll(tokenPattern)].map((match) => ({
+      value: match[1],
+      index: match.index,
+      end: match.index + match[0].length,
+    }));
     const matches = [];
-    for (const person of buildPersonNameIndex(database)) {
-      for (const match of source.matchAll(person.pattern)) {
-        matches.push({
-          type: "person_name",
-          value: match[0],
-          canonical: person.canonical,
-          personKey: person.key,
-          index: match.index,
-        });
+    const consumed = new Set();
+
+    function genderOf(entry) {
+      const gender = String(entry?.gender || "").toUpperCase();
+      if (gender.includes("VĪR") || gender === "M") return "male";
+      if (gender.includes("SIEV") || gender === "F") return "female";
+      return undefined;
+    }
+
+    function addMatch(firstToken, surnameToken, knownFirst, knownSurname) {
+      const value = surnameToken
+        ? source.slice(firstToken.index, surnameToken.end)
+        : firstToken.value;
+      matches.push({
+        type: "person_name",
+        value,
+        canonical: surnameToken
+          ? `${knownFirst?.canonical || firstToken.value} ${knownSurname?.canonical || surnameToken.value}`
+          : knownFirst?.canonical || knownSurname?.canonical || firstToken.value,
+        personKey: surnameToken
+          ? `${knownFirst?.key || "unknown"}:${knownSurname?.key || "unknown"}`
+          : `${knownFirst ? knownFirst.key : "unknown"}:${knownSurname ? knownSurname.key : "unknown"}`,
+        index: firstToken.index,
+      });
+    }
+
+    for (let index = 0; index < tokens.length; index += 1) {
+      const firstToken = tokens[index];
+      const knownFirst = lookupName(firstIndex, firstToken.value);
+      if (!knownFirst) continue;
+
+      const nextToken = tokens[index + 1];
+      const hasOnlyWhitespace = nextToken && /^\s+$/.test(source.slice(firstToken.end, nextToken.index));
+      const knownSurname = hasOnlyWhitespace
+        ? lookupName(surnameIndex, nextToken.value, genderOf(knownFirst))
+        : undefined;
+      const recognizedSurname = knownSurname || (hasOnlyWhitespace && looksLikeLatvianSurname(nextToken.value));
+      const recognized =
+        Boolean(recognizedSurname) &&
+        (Boolean(knownSurname) || !isExtendedKnownForm(nextToken.value, surnameIndex));
+      if (recognized) {
+        addMatch(firstToken, nextToken, knownFirst, knownSurname);
+        consumed.add(index);
+        consumed.add(index + 1);
       }
     }
-    return matches.sort((a, b) => a.index - b.index || b.value.length - a.value.length);
+
+    for (let index = 0; index < tokens.length; index += 1) {
+      if (consumed.has(index)) continue;
+      const token = tokens[index];
+      const knownFirst = lookupName(firstIndex, token.value);
+      const knownSurname = lookupName(surnameIndex, token.value);
+      if (knownFirst) addMatch(token, null, knownFirst, undefined);
+      else if (knownSurname) addMatch(token, null, undefined, knownSurname);
+    }
+
+    return matches.sort((a, b) => a.index - b.index);
+  }
+
+  function buildPersonNameIndex(database = defaultDatabase) {
+    return {
+      firstNames: buildNameFormIndex(database?.firstNames),
+      surnames: buildNameFormIndex(database?.surnames),
+    };
+  }
+
+  function setPersonNameDatabase(database) {
+    activeDatabase = database || { firstNames: {}, surnames: {} };
   }
 
   function isVariableNameValid(name) {
@@ -285,10 +350,12 @@
     isMarkdownTableSeparatorLine,
     extractMarkdownTableCells,
     maskMarkdownTables,
-    LATVIAN_PERSON_NAME_DATABASE,
+    PERSON_NAME_DATABASE: defaultDatabase,
+    LATVIAN_PERSON_NAME_DATABASE: defaultDatabase,
     normalizeNamePart,
     buildPersonNameIndex,
     detectPersonNames,
+    setPersonNameDatabase,
     isVariableNameValid,
     suggestVariableName,
     createVariable,

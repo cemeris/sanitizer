@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "cases": ["nominative", "genitive", "dative", "accusative", "locative"],
+  "classes": {
+    "masculine-is": { "suffixes": ["is", "a", "im", "i", "ī"] },
+    "masculine-s": { "suffixes": ["s", "a", "am", "u", "ā"] },
+    "masculine-sh": { "suffixes": ["š", "a", "am", "u", "ā"] },
+    "feminine-a": { "suffixes": ["a", "as", "ai", "u", "ā"] },
+    "feminine-e": { "suffixes": ["e", "es", "ei", "i", "ē"] },
+    "indeclinable": { "suffixes": ["", "", "", "", ""] }
+  }
+}

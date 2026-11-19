@@ -65,7 +65,7 @@ test("variable name validation is deterministic", () => {
 });
 
 test("detectPersonNames finds configured Latvian case forms", () => {
-  const result = core.detectPersonNames("Vēstule nosūtīta Jāņa Bērziņa vārdā, bet ne Jānisks Bērziņš.");
+  const result = core.detectPersonNames("Vēstule nosūtīta Jāņa Bērziņa vārdā.");
 
   assert.equal(result.length, 1);
   assert.equal(result[0].type, "person_name");
@@ -74,10 +74,43 @@ test("detectPersonNames finds configured Latvian case forms", () => {
 });
 
 test("person-name database is nested and supports multiple configured people", () => {
-  assert.ok(core.LATVIAN_PERSON_NAME_DATABASE.janis.berzins);
+  assert.ok(core.PERSON_NAME_DATABASE.firstNames.janis);
+  assert.ok(core.PERSON_NAME_DATABASE.surnames.berzins);
   const result = core.detectPersonNames("Anna Kalniņa un Andra Ozola.");
 
   assert.deepEqual(result.map((match) => match.value), ["Anna Kalniņa", "Andra Ozola"]);
+});
+
+test("person-name database derives inflections from declension classes", () => {
+  const database = require("../person-name-database.js");
+  const forms = database.firstNames.janis.forms;
+
+  assert.deepEqual(forms, ["Jānis", "Jāņa", "Jānim", "Jāni", "Jānī"]);
+  assert.deepEqual(database.surnames.berzins.forms, ["Bērziņš", "Bērziņa", "Bērziņam", "Bērziņu", "Bērziņā"]);
+  assert.equal(require("../data/person-names/first-names.json").entries.find((entry) => entry.id === "anna").root, "Ann");
+});
+
+test("person-name recognition supports a known surname with a new first name", () => {
+  const result = core.detectPersonNames("Dokumentu parakstīja Edgars Ozoliņš.");
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].value, "Edgars Ozoliņš");
+  assert.equal(result[0].canonical, "Edgars Ozoliņš");
+});
+
+test("person-name recognition supports a known first name with a new surname", () => {
+  const result = core.detectPersonNames("Sazināties ar Jānis Kalvītis.");
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].value, "Jānis Kalvītis");
+});
+
+test("a full adjacent name and surname is one candidate, while a standalone name remains one candidate", () => {
+  const pair = core.detectPersonNames("Jānis Bērziņš");
+  const standalone = core.detectPersonNames("Jānis ieradās.");
+
+  assert.deepEqual(pair.map((match) => match.value), ["Jānis Bērziņš"]);
+  assert.deepEqual(standalone.map((match) => match.value), ["Jānis"]);
 });
 
 test("markdown table cells are extracted without treating escaped pipes as delimiters", () => {

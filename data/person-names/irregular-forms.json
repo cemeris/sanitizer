@@ -1,0 +1,6 @@
+{
+  "janis": { "genitive": "Jāņa" },
+  "andris": { "genitive": "Andra", "locative": "Andrī" },
+  "karlis": { "genitive": "Kārļa", "locative": "Kārlī" },
+  "maris": { "genitive": "Māra", "locative": "Mārī" }
+}
